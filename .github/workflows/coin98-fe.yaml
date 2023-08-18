@@ -1,0 +1,72 @@
+
+name: Docker Image CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        path: coin98-fe
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Login to Amazon ECR Public
+      id: login-ecr-public
+      uses: aws-actions/amazon-ecr-login@v1
+      with:
+        mask-password: 'true'
+        registry-type: public
+
+    - name: Build, tag, and push docker image to Amazon ECR Public
+      env:
+        REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
+        REGISTRY_ALIAS: r3a6p2c4
+        REPOSITORY: coin98-fe
+        IMAGE_TAG: dev-${{ github.sha }}
+      run: |
+        cd coin98-fe
+        docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG .
+        docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+
+    - name: Checkout helm repo
+      uses: actions/checkout@v3
+      with:
+        repository: 'quoctri1/helm-coin98'
+        path: helm-coin98
+
+    - name: Update Image Version in the related HelmChart values.yaml
+      uses: fjogeleit/yaml-update-action@main
+      with:
+        valueFile: 'helm-coin98/coin98-fe/values.yaml'
+        propertyPath: 'image.tag'
+        value: dev-${{ github.sha }}
+        branch: main
+        targetBranch: main
+        createPR: false
+        commitChange: false
+
+    - name: Pushes to public repository
+      id: push_directory
+      uses: cpina/github-action-push-to-another-repository@ssh-deploy-key
+      env:
+        SSH_DEPLOY_KEY: ${{ secrets.WORKFLOW_DEPLOY_KEY }}
+      with:
+        source-directory: helm-coin98/
+        destination-github-username: 'quoctri1'
+        destination-repository-name: 'helm-coin98'
+        user-email: phqtri@gmail.com
+        commit-message: Deploy fe dev-${{ github.sha }}
+        target-branch: main
